@@ -1,0 +1,12 @@
+- [ ] Gemma 3 1B IT: confirm model bundle present, warm-up succeeds, capture notes.
+- [ ] CLI skeleton: stub commands for folder, visit, and question flows.
+- [ ] SQLite schema + migration bootstrap for folders/visits/questions tables.
+- [ ] Data helpers: CRUD implementations and basic validation tests.
+- [ ] Visit creation UX: ensure full form captured and stored in one transaction.
+- [ ] Gemma-powered question generation service (5 questions, retry logic).
+- [ ] Question management commands (delete/undo/add) tied to persistence layer.
+- [ ] Visit note ingestion (record or text paste) with asset storage structure.
+- [ ] Gemma summary generation for transcripts and persistence linkage.
+- [ ] Error handling polish and fallback messaging when model inference fails.
+- [ ] End-to-end scripted run-through for demo and regression checks.
+- [ ] Update docs with setup prerequisites, Gemma model steps, and CLI usage.
