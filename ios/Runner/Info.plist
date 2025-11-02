@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Use the camera to capture visit documents and images.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MediPrep records doctor visits so you can review the conversation later.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Allow MediPrep to import images for visit context.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

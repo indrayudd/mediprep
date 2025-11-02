@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import '../models/llm_model.dart';
 import '../services/model_preferences.dart';
 import '../services/model_service.dart';
-import 'visit_form_screen.dart';
 
 class ModelSetupScreen extends StatefulWidget {
-  const ModelSetupScreen({super.key});
+  const ModelSetupScreen({super.key, this.onModelSelected});
+
+  final ValueChanged<LlmModel>? onModelSelected;
 
   @override
   State<ModelSetupScreen> createState() => _ModelSetupScreenState();
@@ -95,9 +96,11 @@ class _ModelSetupScreenState extends State<ModelSetupScreen> {
       await ModelPreferences.setSelectedModel(model.id);
 
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => VisitFormScreen(model: model)),
-      );
+      if (widget.onModelSelected != null) {
+        widget.onModelSelected!(model);
+      } else if (Navigator.canPop(context)) {
+        Navigator.of(context).pop(model);
+      }
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -113,17 +116,17 @@ class _ModelSetupScreenState extends State<ModelSetupScreen> {
   Future<void> _handleUseModel(LlmModel model) async {
     await ModelPreferences.setSelectedModel(model.id);
     if (!mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => VisitFormScreen(model: model)),
-    );
+    if (widget.onModelSelected != null) {
+      widget.onModelSelected!(model);
+    } else if (Navigator.canPop(context)) {
+      Navigator.of(context).pop(model);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Choose a local model'),
-      ),
+      appBar: AppBar(title: const Text('Choose a local model')),
       body: _loadingStatus
           ? const Center(child: CircularProgressIndicator())
           : Padding(
@@ -149,7 +152,11 @@ class _ModelSetupScreenState extends State<ModelSetupScreen> {
                       hintText: 'hf_xxx',
                       helperText: 'Leave blank for public models.',
                       suffixIcon: IconButton(
-                        icon: Icon(_obscureToken ? Icons.visibility : Icons.visibility_off),
+                        icon: Icon(
+                          _obscureToken
+                              ? Icons.visibility
+                              : Icons.visibility_off,
+                        ),
                         onPressed: () {
                           setState(() {
                             _obscureToken = !_obscureToken;
@@ -211,7 +218,9 @@ class _ModelSetupScreenState extends State<ModelSetupScreen> {
                               children: [
                                 Text(
                                   model.displayName,
-                                  style: Theme.of(context).textTheme.titleMedium,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
                                 ),
                                 const SizedBox(height: 8),
                                 Text(model.description),
@@ -222,17 +231,22 @@ class _ModelSetupScreenState extends State<ModelSetupScreen> {
                                   Text(
                                     model.licenseUrl!,
                                     style: const TextStyle(
-                                        fontSize: 12, color: Colors.blueAccent),
+                                      fontSize: 12,
+                                      color: Colors.blueAccent,
+                                    ),
                                   ),
                                 ],
                                 const SizedBox(height: 12),
                                 if (progress != null)
                                   Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       LinearProgressIndicator(value: progress),
                                       const SizedBox(height: 6),
-                                      Text('${(progress * 100).clamp(0, 100).toStringAsFixed(0)}%'),
+                                      Text(
+                                        '${(progress * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                                      ),
                                     ],
                                   )
                                 else
@@ -242,12 +256,16 @@ class _ModelSetupScreenState extends State<ModelSetupScreen> {
                                         onPressed: installed
                                             ? () => _handleUseModel(model)
                                             : () => _handleDownload(model),
-                                        icon: Icon(installed
-                                            ? Icons.check_circle
-                                            : Icons.download),
-                                        label: Text(installed
-                                            ? 'Use this model'
-                                            : 'Download & use'),
+                                        icon: Icon(
+                                          installed
+                                              ? Icons.check_circle
+                                              : Icons.download,
+                                        ),
+                                        label: Text(
+                                          installed
+                                              ? 'Use this model'
+                                              : 'Download & use',
+                                        ),
                                       ),
                                       const SizedBox(width: 12),
                                       if (installed)

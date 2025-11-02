@@ -52,4 +52,26 @@ class VisitAttachment {
     final type = inferTypeFromMime(mime, ext.isEmpty ? null : ext);
     return VisitAttachment(path: path, name: name, type: type, mimeType: mime);
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'path': path,
+      'name': name,
+      'type': type.name,
+      'mimeType': mimeType,
+    };
+  }
+
+  static VisitAttachment fromMap(Map<String, dynamic> map) {
+    final typeName = map['type'] as String? ?? AttachmentType.other.name;
+    return VisitAttachment(
+      path: map['path'] as String? ?? '',
+      name: map['name'] as String? ?? '',
+      type: AttachmentType.values.firstWhere(
+        (value) => value.name == typeName,
+        orElse: () => AttachmentType.other,
+      ),
+      mimeType: map['mimeType'] as String?,
+    );
+  }
 }

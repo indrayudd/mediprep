@@ -5,18 +5,29 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 
 import '../data/attachment.dart';
+import '../data/visit_draft.dart';
+import '../data/visit_folder.dart';
 import '../data/visit_info.dart';
 import '../models/llm_model.dart';
-import '../services/model_preferences.dart';
-import 'model_setup_screen.dart';
+import '../services/visit_repository.dart';
 import 'question_generation_screen.dart';
 
+const _newFolderOption = '__new_folder__';
+
 class VisitFormScreen extends StatefulWidget {
-  const VisitFormScreen({super.key, required this.model});
+  const VisitFormScreen({
+    super.key,
+    required this.model,
+    this.initialFolderId,
+    this.onChangeModel,
+  });
 
   final LlmModel model;
+  final String? initialFolderId;
+  final VoidCallback? onChangeModel;
 
   @override
   State<VisitFormScreen> createState() => _VisitFormScreenState();
@@ -28,9 +39,88 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
   final _doctorNameController = TextEditingController();
   final _hospitalNameController = TextEditingController();
   final _descriptionController = TextEditingController();
+  final _patientNameController = TextEditingController();
+  final _conditionNameController = TextEditingController();
   DateTime? _visitDate;
   var _attachments = <VisitAttachment>[];
   bool _isPickingAttachments = false;
+  String _folderSelection = _newFolderOption;
+  bool _syncedInitialFolder = false;
+
+  bool get _isNewFolder => _folderSelection == _newFolderOption;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_syncedInitialFolder) return;
+    final repository = context.read<VisitRepository>();
+    final folders = repository.folders;
+    if (folders.isNotEmpty) {
+      final initialId = widget.initialFolderId;
+      if (initialId != null &&
+          folders.any((folder) => folder.id == initialId)) {
+        _applyFolderSelection(initialId, folders, notify: false);
+      } else {
+        _applyFolderSelection(_newFolderOption, folders, notify: false);
+      }
+    }
+    _syncedInitialFolder = true;
+  }
+
+  void _applyFolderSelection(
+    String selection,
+    List<VisitFolder> folders, {
+    bool notify = true,
+  }) {
+    if (selection == _newFolderOption) {
+      if (notify) {
+        setState(() {
+          _folderSelection = selection;
+        });
+      } else {
+        _folderSelection = selection;
+      }
+      return;
+    }
+
+    final folder = _findFolder(folders, selection);
+    if (folder == null) {
+      if (notify) {
+        setState(() {
+          _folderSelection = _newFolderOption;
+        });
+      } else {
+        _folderSelection = _newFolderOption;
+      }
+      return;
+    }
+
+    _patientNameController.text = folder.patientName;
+    _conditionNameController.text = folder.conditionName;
+    _doctorNameController.text = folder.primaryDoctor;
+    _hospitalNameController.text = folder.primaryHospital;
+
+    if (notify) {
+      setState(() {
+        _folderSelection = folder.id;
+      });
+    } else {
+      _folderSelection = folder.id;
+    }
+  }
+
+  VisitFolder? _findFolder(List<VisitFolder> folders, String id) {
+    try {
+      return folders.firstWhere((folder) => folder.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _handleFolderChanged(String? value, List<VisitFolder> folders) {
+    final selection = value ?? _newFolderOption;
+    _applyFolderSelection(selection, folders);
+  }
 
   @override
   void dispose() {
@@ -38,6 +128,8 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
     _doctorNameController.dispose();
     _hospitalNameController.dispose();
     _descriptionController.dispose();
+    _patientNameController.dispose();
+    _conditionNameController.dispose();
     super.dispose();
   }
 
@@ -69,6 +161,33 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
       return;
     }
 
+    final repository = context.read<VisitRepository>();
+    final folders = repository.folders;
+    final isNewFolder = _isNewFolder || folders.isEmpty;
+
+    if (!isNewFolder && _folderSelection == _newFolderOption) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a folder to continue.')),
+      );
+      return;
+    }
+
+    final patientName = _patientNameController.text.trim();
+    final conditionName = _conditionNameController.text.trim();
+
+    if (isNewFolder) {
+      if (patientName.isEmpty || conditionName.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Enter patient and condition details for the folder.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
     final info = VisitInfo(
       visitName: _visitNameController.text.trim(),
       visitDate: _visitDate!,
@@ -78,20 +197,22 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
       attachments: List.unmodifiable(_attachments),
     );
 
+    final draft = isNewFolder
+        ? VisitDraft(
+            visitInfo: info,
+            patientName: patientName,
+            conditionName: conditionName,
+          )
+        : VisitDraft(visitInfo: info, existingFolderId: _folderSelection);
+
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            QuestionGenerationScreen(model: widget.model, visitInfo: info),
+        builder: (_) => QuestionGenerationScreen(
+          model: widget.model,
+          draft: draft,
+          onChangeModel: widget.onChangeModel,
+        ),
       ),
-    );
-  }
-
-  Future<void> _changeModel() async {
-    await ModelPreferences.clearSelectedModel();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const ModelSetupScreen()),
-      (_) => false,
     );
   }
 
@@ -158,6 +279,7 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
     FileType fileType, {
     List<String>? extensions,
   }) async {
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _isPickingAttachments = true;
     });
@@ -222,21 +344,17 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final repository = context.watch<VisitRepository>();
+    final folders = repository.folders;
+    final hasFolders = folders.isNotEmpty;
+    final isNewFolder = _isNewFolder || !hasFolders;
+    final folderValue = isNewFolder ? _newFolderOption : _folderSelection;
     final dateLabel = _visitDate == null
         ? 'Select date'
         : DateFormat.yMMMMd().format(_visitDate!);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Plan your visit'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.swap_horiz),
-            tooltip: 'Change model',
-            onPressed: _changeModel,
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Plan your visit')),
       body: GestureDetector(
         onTap: () => FocusScope.of(context).unfocus(),
         behavior: HitTestBehavior.opaque,
@@ -247,6 +365,80 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (hasFolders) ...[
+                  Text(
+                    'Where should this visit live?',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: folderValue,
+                    onChanged: (value) => _handleFolderChanged(value, folders),
+                    items: [
+                      const DropdownMenuItem<String>(
+                        value: _newFolderOption,
+                        child: Text('Create new folder'),
+                      ),
+                      ...folders.map(
+                        (folder) => DropdownMenuItem<String>(
+                          value: folder.id,
+                          child: Text(
+                            '${folder.patientName} · ${folder.conditionName}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                    decoration: const InputDecoration(labelText: 'Folder'),
+                  ),
+                  const SizedBox(height: 16),
+                  if (!isNewFolder)
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        'Patient and condition details are managed at the folder level.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
+                _buildTextField(
+                  controller: _patientNameController,
+                  label: 'Patient name',
+                  hint: 'e.g. Jane Doe',
+                  enabled: isNewFolder,
+                  validator: (value) {
+                    if (isNewFolder &&
+                        (value == null || value.trim().isEmpty)) {
+                      return 'Please enter patient name';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _conditionNameController,
+                  label: 'Condition / folder title',
+                  hint: 'e.g. Viral fever',
+                  enabled: isNewFolder,
+                  validator: (value) {
+                    if (isNewFolder &&
+                        (value == null || value.trim().isEmpty)) {
+                      return 'Please describe the condition';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
                 _buildTextField(
                   controller: _visitNameController,
                   label: 'Visit name',
@@ -268,12 +460,14 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
                   controller: _doctorNameController,
                   label: 'Doctor name',
                   hint: 'e.g. Dr. Priya Nair',
+                  enabled: isNewFolder,
                 ),
                 const SizedBox(height: 12),
                 _buildTextField(
                   controller: _hospitalNameController,
                   label: 'Hospital / Clinic name',
                   hint: 'e.g. Lakeside Medical Center',
+                  enabled: isNewFolder,
                 ),
                 const SizedBox(height: 12),
                 _buildTextField(
@@ -368,6 +562,9 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
     required String label,
     String? hint,
     int maxLines = 1,
+    bool enabled = true,
+    TextInputType? keyboardType,
+    String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
@@ -377,12 +574,19 @@ class _VisitFormScreenState extends State<VisitFormScreen> {
         border: const OutlineInputBorder(),
       ),
       maxLines: maxLines,
-      validator: (value) {
-        if (value == null || value.trim().isEmpty) {
-          return 'Please enter ${label.toLowerCase()}';
-        }
-        return null;
-      },
+      enabled: enabled,
+      keyboardType: keyboardType,
+      validator:
+          validator ??
+          (value) {
+            if (!enabled) {
+              return null;
+            }
+            if (value == null || value.trim().isEmpty) {
+              return 'Please enter ${label.toLowerCase()}';
+            }
+            return null;
+          },
     );
   }
 }
