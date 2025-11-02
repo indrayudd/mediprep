@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:intl/intl.dart';
 
+import '../data/attachment.dart';
 import '../data/visit_info.dart';
 import '../models/llm_model.dart';
+import '../services/attachment_processor.dart';
 import '../services/model_service.dart';
 
 class QuestionGenerationScreen extends StatefulWidget {
@@ -26,10 +28,15 @@ class QuestionGenerationScreen extends StatefulWidget {
 
 class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
   final _modelService = const ModelService();
+  final AttachmentProcessor _attachmentProcessor = const AttachmentProcessor();
   StreamSubscription<ModelResponse>? _subscription;
+  InferenceChat? _activeChat;
   String _streamedText = '';
   bool _isGenerating = true;
   String? _error;
+  bool _processingAttachments = false;
+  AttachmentProcessingResult? _attachmentResult;
+  String? _attachmentWarning;
 
   @override
   void initState() {
@@ -40,19 +47,52 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
   @override
   void dispose() {
     _subscription?.cancel();
+    _activeChat?.session.close();
     super.dispose();
   }
 
   Future<void> _startGeneration() async {
+    await _subscription?.cancel();
+    await _activeChat?.session.close();
+    _activeChat = null;
     setState(() {
       _isGenerating = true;
       _error = null;
       _streamedText = '';
+      _attachmentWarning = null;
+      _processingAttachments = widget.visitInfo.attachments.isNotEmpty;
+    });
+
+    String attachmentSection = '';
+    String? attachmentWarning;
+    AttachmentProcessingResult? attachmentResult;
+
+    if (widget.visitInfo.attachments.isNotEmpty) {
+      try {
+        attachmentResult = await _attachmentProcessor.process(
+          widget.visitInfo.attachments,
+        );
+        attachmentSection = attachmentResult.buildPromptSection();
+      } catch (e) {
+        attachmentWarning = 'Failed to read attachments: $e';
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _attachmentResult = attachmentResult;
+      _attachmentWarning = attachmentWarning;
+      _processingAttachments = false;
     });
 
     try {
       final chat = await _modelService.createChat(widget.model);
-      final prompt = _buildPrompt(widget.visitInfo);
+      _activeChat = chat;
+
+      final prompt = _buildPrompt(
+        widget.visitInfo,
+        attachmentContext: attachmentSection,
+      );
       await chat.addQuery(Message(text: prompt, isUser: true));
       final stream = chat.generateChatResponseAsync();
       _subscription = stream.listen(
@@ -82,7 +122,7 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
       });
     } on StateError catch (e) {
       setState(() {
-        _error = e.message ?? e.toString();
+        _error = e.message;
         _isGenerating = false;
       });
     } catch (e) {
@@ -93,22 +133,41 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
     }
   }
 
-  String _buildPrompt(VisitInfo info) {
+  String _buildPrompt(VisitInfo info, {String? attachmentContext}) {
     final formattedDate = DateFormat.yMMMMd().format(info.visitDate);
-    return '''You are a helpful medical assistant preparing a patient for an upcoming appointment. Using the details provided, craft exactly five succinct questions the patient should ask the doctor. Each question should be actionable, specific, and reflect the patient's concerns.
+    final buffer = StringBuffer(
+      'You are a helpful medical assistant preparing a patient for an upcoming appointment. Using the details provided, craft exactly five succinct questions the patient should ask the doctor. Each question should be actionable, specific, and reflect the patient\'s concerns.\n\n',
+    );
 
-VISIT DETAILS:
-- Visit name: ${info.visitName}
-- Visit date: $formattedDate
-- Doctor: ${info.doctorName}
-- Hospital/Clinic: ${info.hospitalName}
-- Patient notes: ${info.description}
+    buffer
+      ..writeln('VISIT DETAILS:')
+      ..writeln('- Visit name: ${info.visitName}')
+      ..writeln('- Visit date: $formattedDate')
+      ..writeln('- Doctor: ${info.doctorName}')
+      ..writeln('- Hospital/Clinic: ${info.hospitalName}')
+      ..writeln('- Patient notes: ${info.description}\n');
 
-Guidelines:
-- Return ONLY the questions as a numbered list from 1 to 5.
-- Avoid introductions or closing remarks.
-- Make sure the questions feel natural for a patient preparing for this visit.
-''';
+    if (attachmentContext != null && attachmentContext.trim().isNotEmpty) {
+      buffer
+        ..writeln(attachmentContext.trim())
+        ..writeln();
+    }
+
+    buffer
+      ..writeln('Guidelines:')
+      ..writeln(
+        '- Return ONLY the questions as a numbered list from 1 to 5, using the format "1. Question" (digit, period, space).',
+      )
+      ..writeln('- Avoid introductions or closing remarks.')
+      ..writeln(
+        '- Write in the patient’s first-person voice addressing the doctor (e.g., "Doctor, could we...?").',
+      )
+      ..writeln(
+        '- Focus on what the patient wants the doctor to explain, diagnose, or decide.',
+      )
+      ..writeln('- Do NOT ask the patient for more information or symptoms.');
+
+    return buffer.toString();
   }
 
   @override
@@ -128,6 +187,64 @@ Guidelines:
               style: theme.textTheme.titleMedium,
             ),
             const SizedBox(height: 12),
+            if (_processingAttachments)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Processing attachments for additional context…',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (!_processingAttachments &&
+                _attachmentResult != null &&
+                _attachmentResult!.details.isNotEmpty)
+              _AttachmentChipStrip(details: _attachmentResult!.details),
+            if (!_processingAttachments && _attachmentWarning != null)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.report_problem_outlined,
+                      color: Colors.orange,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _attachmentWarning!,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.orange.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (_error != null)
               Expanded(
                 child: Center(
@@ -249,7 +366,7 @@ Guidelines:
       if (line.contains('[tool_response]')) {
         continue;
       }
-      final match = RegExp(r'^(?:\d+\.\s*)(.*)$').firstMatch(line);
+      final match = RegExp(r'^(?:\d+\s*[-\.\)]\s*)(.*)$').firstMatch(line);
       if (match != null) {
         final question = match.group(1)?.trim();
         if (question != null && question.isNotEmpty) {
@@ -283,8 +400,97 @@ Guidelines:
     final message = exception.message ?? exception.toString();
     if (message.contains('Cannot allocate memory')) {
       return 'The selected model could not be loaded because the device ran out of memory. '
-          'Try switching to the smaller Gemma 3 270M model from the setup screen, then retry.';
+          'Please close other apps, free up storage space, and try again.';
     }
     return 'Failed to start the model (${exception.code}): $message';
+  }
+}
+
+class _AttachmentChipStrip extends StatelessWidget {
+  const _AttachmentChipStrip({required this.details});
+
+  final List<AttachmentContextDetail> details;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.attachment,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 6),
+              Text('Attachments processed', style: theme.textTheme.titleSmall),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: details
+                .map((detail) => _buildChip(context, detail))
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip(BuildContext context, AttachmentContextDetail detail) {
+    final attachment = detail.attachment;
+    final icon = switch (attachment.type) {
+      AttachmentType.pdf => Icons.picture_as_pdf,
+      AttachmentType.image => Icons.image_outlined,
+      AttachmentType.other => Icons.insert_drive_file,
+    };
+
+    final badges = <String>[];
+    if (detail.extractedText != null && detail.extractedText!.isNotEmpty) {
+      badges.add('text');
+    }
+    if (detail.labels.isNotEmpty) {
+      badges.add('vision');
+    }
+    final status = badges.isEmpty ? null : badges.join(' · ');
+    final label = status == null
+        ? attachment.name
+        : '${attachment.name} · $status';
+    final tooltip = _tooltip(detail);
+
+    return InputChip(
+      avatar: Icon(icon, size: 18),
+      label: Text(label, overflow: TextOverflow.ellipsis),
+      tooltip: tooltip.isEmpty ? null : tooltip,
+      onPressed: null,
+      showCheckmark: false,
+    );
+  }
+
+  String _tooltip(AttachmentContextDetail detail) {
+    final items = <String>[];
+    if (detail.extractedText != null && detail.extractedText!.isNotEmpty) {
+      items.add(_trim(detail.extractedText!, 140));
+    }
+    if (detail.labels.isNotEmpty) {
+      items.add('Labels: ${detail.labels.take(4).join(', ')}');
+    }
+    return items.join('\n');
+  }
+
+  String _trim(String value, int maxChars) {
+    final cleaned = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (cleaned.length <= maxChars) {
+      return cleaned;
+    }
+    return '${cleaned.substring(0, maxChars)}…';
   }
 }
