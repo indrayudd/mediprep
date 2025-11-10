@@ -9,6 +9,8 @@ import 'screens/model_setup_screen.dart';
 import 'services/local_visit_store.dart';
 import 'services/model_preferences.dart';
 import 'services/visit_repository.dart';
+import 'theme/app_theme.dart';
+import 'widgets/recording_overlay.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,23 +23,30 @@ class DoctorVisitPlannerApp extends StatelessWidget {
   const DoctorVisitPlannerApp({super.key, required this.repository});
 
   final VisitRepository repository;
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
+  static final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider.value(
-      value: repository,
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider.value(value: repository),
+        ChangeNotifierProvider(
+          create: (_) => RecordingOverlayController(
+            navigatorKey,
+            scaffoldMessengerKey,
+          ),
+        ),
+      ],
       child: MaterialApp(
         title: 'MediPrep',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
-          useMaterial3: true,
-          scaffoldBackgroundColor: const Color(0xFFF7F9FB),
-          appBarTheme: const AppBarTheme(centerTitle: false, elevation: 0),
-          inputDecorationTheme: const InputDecorationTheme(
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.all(Radius.circular(16)),
-            ),
-          ),
+        theme: AppTheme.build(),
+        navigatorKey: navigatorKey,
+        scaffoldMessengerKey: scaffoldMessengerKey,
+        builder: (context, child) => RecordingOverlayHost(
+          child: child ?? const SizedBox.shrink(),
         ),
         home: const _BootstrapScreen(),
       ),

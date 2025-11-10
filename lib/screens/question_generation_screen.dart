@@ -9,7 +9,6 @@ import 'package:provider/provider.dart';
 
 import '../data/attachment.dart';
 import '../data/question_note.dart';
-import '../data/recording_meta.dart';
 import '../data/visit_draft.dart';
 import '../data/visit_info.dart';
 import '../data/visit_record.dart';
@@ -17,7 +16,7 @@ import '../models/llm_model.dart';
 import '../services/attachment_processor.dart';
 import '../services/model_service.dart';
 import '../services/visit_repository.dart';
-import '../widgets/recording_dock.dart';
+import '../theme/app_colors.dart';
 import 'visit_detail_screen.dart';
 
 final _idRandom = Random();
@@ -56,7 +55,8 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
   String? _visitId;
   DateTime? _visitCreatedAt;
   List<QuestionNote> _questionNotes = const [];
-  List<RecordingMeta> _recordings = const [];
+  final List<String> _manualQuestions = [];
+  final Set<String> _dismissedGeneratedQuestions = <String>{};
 
   @override
   void initState() {
@@ -82,6 +82,7 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
       _attachmentWarning = null;
       _processingAttachments = widget.draft.visitInfo.attachments.isNotEmpty;
       _saveError = null;
+      _dismissedGeneratedQuestions.clear();
     });
 
     String attachmentSection = '';
@@ -157,7 +158,7 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
   String _buildPrompt(VisitInfo info, {String? attachmentContext}) {
     final formattedDate = DateFormat.yMMMMd().format(info.visitDate);
     final buffer = StringBuffer(
-      'You are a helpful medical assistant preparing a patient for an upcoming appointment. Using the details provided, craft exactly five succinct questions the patient should ask the doctor. Each question should be actionable, specific, and reflect the patient\'s concerns.\n\n',
+      'You are a helpful medical assistant preparing a patient for an upcoming appointment. Using the details provided, craft as many succinct questions as needed (no more than 15) that the patient should ask the doctor. Each question should be actionable, specific, and reflect the patient\'s concerns.\n\n',
     );
 
     buffer
@@ -177,7 +178,7 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
     buffer
       ..writeln('Guidelines:')
       ..writeln(
-        '- Return ONLY the questions as a numbered list from 1 to 5, using the format "1. Question" (digit, period, space).',
+        '- Return ONLY the questions as a numbered list (1., 2., …) and do not exceed fifteen total items.',
       )
       ..writeln('- Avoid introductions or closing remarks.')
       ..writeln(
@@ -191,277 +192,215 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
     return buffer.toString();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final questions = _parseQuestions(_streamedText);
-    final visitInfo = widget.draft.visitInfo;
+  List<_QuestionEntry> _buildQuestionEntries() {
+    final generated = _parseQuestions(_streamedText)
+        .map((text) => _QuestionEntry(text: text.trim()))
+        .where(
+          (entry) =>
+              entry.text.isNotEmpty &&
+              !_dismissedGeneratedQuestions.contains(entry.text),
+        );
+    final manual = _manualQuestions
+        .map((text) => _QuestionEntry(text: text.trim(), isCustom: true))
+        .where((entry) => entry.text.isNotEmpty);
+    return [...generated, ...manual];
+  }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Discussion guide')),
-      body: RecordingDock(
-        enabled: !_isGenerating,
-        ensureContext: _ensureRecordingContext,
-        onRecordingSaved: _handleRecordingStored,
-        onError: (error) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Recording failed: $error')));
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+  Future<void> _showAddQuestionSheet() async {
+    final controller = TextEditingController();
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+            top: 24,
+          ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Questions to ask during "${visitInfo.visitName}"',
-                style: theme.textTheme.titleMedium,
+                'Add your own question',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
               ),
               const SizedBox(height: 12),
-              if (_processingAttachments)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Processing attachments for additional context…',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ),
-                    ],
-                  ),
+              TextField(
+                controller: controller,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  hintText: 'What else would you like to ask the doctor?',
                 ),
-              if (!_processingAttachments &&
-                  _attachmentResult != null &&
-                  _attachmentResult!.details.isNotEmpty)
-                _AttachmentChipStrip(details: _attachmentResult!.details),
-              if (!_processingAttachments && _attachmentWarning != null)
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(
-                        Icons.report_problem_outlined,
-                        color: Colors.orange,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _attachmentWarning!,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: Colors.orange.shade900,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              if (_error != null)
-                Expanded(
-                  child: Center(
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              else if (questions.isEmpty)
-                Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_isGenerating)
-                          const CircularProgressIndicator()
-                        else
-                          const Icon(Icons.info_outline, size: 48),
-                        const SizedBox(height: 16),
-                        Text(
-                          _isGenerating
-                              ? 'Generating questions…'
-                              : 'Waiting for the model output…',
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                Expanded(
-                  child: ListView.separated(
-                    padding: EdgeInsets.zero,
-                    itemCount: questions.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) {
-                      final text = questions[index];
-                      final isFinal =
-                          !_isGenerating && index == questions.length - 1;
-                      return AnimatedOpacity(
-                        opacity: 1,
-                        duration: const Duration(milliseconds: 200),
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${index + 1}. ',
-                                style: theme.textTheme.titleMedium,
-                              ),
-                              Expanded(
-                                child: Text(
-                                  text,
-                                  style: theme.textTheme.bodyLarge,
-                                ),
-                              ),
-                              if (_isGenerating &&
-                                  index == questions.length - 1)
-                                const Padding(
-                                  padding: EdgeInsets.only(left: 8),
-                                  child: SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
-                              if (!_isGenerating && isFinal)
-                                const Padding(
-                                  padding: EdgeInsets.only(left: 8),
-                                  child: Icon(
-                                    Icons.check_circle,
-                                    color: Colors.green,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
+              ),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _isGenerating || _isSaving
-                      ? null
-                      : () => _saveVisitAndNavigate(questions),
-                  icon: _isSaving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.check_circle_outline),
-                  label: Text(_isSaving ? 'Saving…' : 'Save to folder'),
+                child: FilledButton(
+                  onPressed: () {
+                    final value = controller.text.trim();
+                    if (value.isEmpty) return;
+                    Navigator.of(context).pop(value);
+                  },
+                  child: const Text('Add question'),
                 ),
               ),
-              if (_saveError != null) ...[
-                const SizedBox(height: 8),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _saveError!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: _isGenerating ? null : _startGeneration,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Regenerate'),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    _isGenerating
-                        ? 'Streaming response…'
-                        : 'Generation complete',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
             ],
           ),
+        );
+      },
+    );
+    if (result != null && result.trim().isNotEmpty) {
+      setState(() {
+        _manualQuestions.add(result.trim());
+      });
+    }
+  }
+
+  void _removeQuestionEntry(_QuestionEntry entry) {
+    setState(() {
+      if (entry.isCustom) {
+        _manualQuestions.remove(entry.text);
+      } else {
+        _dismissedGeneratedQuestions.add(entry.text);
+      }
+    });
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visitInfo = widget.draft.visitInfo;
+    final questionEntries = _buildQuestionEntries();
+    final lastGeneratedIndex = questionEntries.lastIndexWhere(
+      (entry) => !entry.isCustom,
+    );
+
+    Widget questionContent;
+    if (_error != null) {
+      questionContent = _StatusCard(
+        icon: Icons.error_outline,
+        message: _error!,
+        accentColor: theme.colorScheme.error,
+      );
+    } else if (questionEntries.isEmpty) {
+      questionContent = _StatusCard(
+        icon: _isGenerating ? Icons.sync : Icons.info_outline,
+        message: _isGenerating
+            ? 'Generating your tailored discussion guide…'
+            : 'Waiting for the model output…',
+      );
+    } else {
+      questionContent = Column(
+        children: questionEntries.asMap().entries.map((entry) {
+          final index = entry.key;
+          final question = entry.value;
+          final showSpinner =
+              _isGenerating && index == lastGeneratedIndex && !question.isCustom;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _QuestionCard(
+              index: index + 1,
+              entry: question,
+              showSpinner: showSpinner,
+              onRemove: () => _removeQuestionEntry(question),
+            ),
+          );
+        }).toList(),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Discussion guide'),
+        actions: [
+          IconButton(
+            tooltip: 'Change AI model',
+            onPressed: widget.onChangeModel,
+            icon: const Icon(Icons.settings),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _VisitHeroCard(
+                      info: visitInfo,
+                      isGenerating: _isGenerating,
+                      processingAttachments: _processingAttachments,
+                    ),
+                    const SizedBox(height: 16),
+                    if (_processingAttachments)
+                      _AttachmentStatusCard(
+                        message: 'Processing attachments for extra context…',
+                        icon: Icons.sync,
+                      ),
+                    if (!_processingAttachments &&
+                        _attachmentResult != null &&
+                        _attachmentResult!.details.isNotEmpty) ...[
+                      _AttachmentChipStrip(details: _attachmentResult!.details),
+                      const SizedBox(height: 8),
+                    ],
+                    if (!_processingAttachments && _attachmentWarning != null)
+                      _AttachmentStatusCard(
+                        message: _attachmentWarning!,
+                        icon: Icons.warning_amber_rounded,
+                        accentColor: Colors.orange,
+                      ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Generated questions',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _isSaving ? null : _showAddQuestionSheet,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add more'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    questionContent,
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+            _BottomActionBar(
+              isSaving: _isSaving,
+              onSave: _isGenerating ? null : _saveVisitAndNavigate,
+              onRegenerate: _isGenerating ? null : _startGeneration,
+              saveError: _saveError,
+              isGenerating: _isGenerating,
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Future<RecordingSessionContext?> _ensureRecordingContext() async {
-    final questions = _parseQuestions(_streamedText);
-    final visit = await _persistVisit(
-      questions: questions,
-      setSavingState: false,
-    );
-    if (!mounted || visit == null || _folderId == null) {
-      return null;
-    }
-    return RecordingSessionContext(
-      folderId: _folderId!,
-      visitId: visit.id,
-      visitTitle: widget.draft.visitInfo.visitName,
-      visitDate: widget.draft.visitInfo.visitDate,
-    );
-  }
-
-  Future<void> _handleRecordingStored(
-    RecordingSessionContext ctx,
-    RecordingMeta recording,
-  ) async {
-    final repository = context.read<VisitRepository>();
-    await repository.addRecording(
-      folderId: ctx.folderId,
-      visitId: ctx.visitId,
-      recording: recording,
-    );
-    final refreshed = repository.getVisitById(ctx.folderId, ctx.visitId);
-    if (!mounted) return;
-    setState(() {
-      _recordings = refreshed?.recordings ?? [..._recordings, recording];
-    });
-  }
-
   Future<VisitRecord?> _persistVisit({
-    required List<String> questions,
+    required List<_QuestionEntry> entries,
     required bool setSavingState,
   }) async {
     final visitInfo = widget.draft.visitInfo;
@@ -478,7 +417,10 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
       _folderId = await _ensureFolderId(repository);
       final now = DateTime.now();
       final visitId = _visitId ?? _generateId();
-      final notes = _hydrateQuestionNotes(questions, now);
+      final existingVisit = _folderId == null
+          ? null
+          : repository.getVisitById(_folderId!, visitId);
+      final notes = _hydrateQuestionNotes(entries, now);
 
       final visit = VisitRecord(
         id: visitId,
@@ -487,7 +429,7 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
         description: visitInfo.description,
         questions: notes,
         attachments: visitInfo.attachments,
-        recordings: _recordings,
+        recordings: existingVisit?.recordings ?? const [],
         createdAt: _visitCreatedAt ?? now,
         updatedAt: now,
       );
@@ -536,34 +478,45 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
   }
 
   List<QuestionNote> _hydrateQuestionNotes(
-    List<String> questions,
+    List<_QuestionEntry> entries,
     DateTime timestamp,
   ) {
-    if (questions.isEmpty) {
+    if (entries.isEmpty) {
       _questionNotes = const [];
       return _questionNotes;
     }
     final notes = <QuestionNote>[];
-    for (final text in questions) {
-      final trimmed = text.trim();
+    for (final entry in entries) {
+      final trimmed = entry.text.trim();
       if (trimmed.isEmpty) continue;
-      final existing = _questionNotes.firstWhere(
+      final existingIndex = _questionNotes.indexWhere(
         (note) => note.text == trimmed,
-        orElse: () => QuestionNote(
-          id: _generateId(),
-          text: trimmed,
-          createdAt: timestamp,
-        ),
       );
-      notes.add(existing);
+      if (existingIndex != -1) {
+        final existing = _questionNotes[existingIndex];
+        notes.add(
+          existing.isCustom == entry.isCustom
+              ? existing
+              : existing.copyWith(isCustom: entry.isCustom),
+        );
+      } else {
+        notes.add(
+          QuestionNote(
+            id: _generateId(),
+            text: trimmed,
+            createdAt: timestamp,
+            isCustom: entry.isCustom,
+          ),
+        );
+      }
     }
     _questionNotes = notes;
     return notes;
   }
 
-  Future<void> _saveVisitAndNavigate(List<String> questions) async {
+  Future<void> _saveVisitAndNavigate() async {
     final visit = await _persistVisit(
-      questions: questions,
+      entries: _buildQuestionEntries(),
       setSavingState: true,
     );
     if (!mounted || visit == null || _folderId == null) {
@@ -584,44 +537,65 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
   }
 
   List<String> _parseQuestions(String rawText) {
-    final lines = rawText
-        .split(RegExp(r'\n|\r'))
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList();
+    final normalized = rawText
+        .replaceAll('\\n', '\n')
+        .replaceAll('\\r', '\n')
+        .replaceAll('\r', '\n');
 
-    final result = <String>[];
-    for (final line in lines) {
-      if (line.contains('[tool_response]')) {
-        continue;
-      }
-      final match = RegExp(r'^(?:\d+\s*[-\.\)]\s*)(.*)$').firstMatch(line);
-      if (match != null) {
-        final question = match.group(1)?.trim();
-        if (question != null && question.isNotEmpty) {
-          result.add(question);
-        }
-      } else if (result.isNotEmpty) {
-        final last = result.removeLast();
-        final merged = '$last ${line.replaceFirst(RegExp(r'^[-•]'), '').trim()}'
-            .trim();
-        result.add(merged);
-      }
+    final numberedRegex = RegExp(
+      r'(?:^|\n)\s*\d{1,2}[\.\)\-\s:]*([^\n].*?)(?=(?:\n\s*\d{1,2}[\.\)\-\s:])|\n*$)',
+      multiLine: true,
+      dotAll: true,
+    );
+
+    final matches = numberedRegex.allMatches(normalized);
+    final results = <String>[];
+
+    void addClean(String text) {
+      var cleaned = text
+          .replaceAll('[tool_response]', '')
+          .replaceAll('\n', ' ')
+          .replaceAll('’', '\'')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trimLeft();
+      cleaned = _stripQuestionPrefix(cleaned).trim();
+      if (cleaned.isEmpty || cleaned == 's') return;
+      results.add(cleaned);
     }
 
-    if (result.isEmpty && lines.isNotEmpty) {
+    if (matches.isNotEmpty) {
+      for (final match in matches) {
+        final text = match.group(1);
+        if (text != null) {
+          addClean(text);
+        }
+      }
+    } else {
+      final lines = normalized
+          .split(RegExp(r'\n+'))
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .toList();
       for (final line in lines) {
-        final cleaned = line.replaceFirst(RegExp(r'^[-•]'), '').trim();
-        if (cleaned.isNotEmpty) {
-          result.add(cleaned);
-        }
+        addClean(line);
       }
     }
 
-    if (result.length > 5) {
-      return result.take(5).toList();
+    if (results.length > 15) {
+      return results.take(15).toList();
     }
-    return result;
+    return results;
+  }
+
+  String _stripQuestionPrefix(String text) {
+    var cleaned = text.trimLeft();
+    final markerPattern = RegExp(
+      r"^\d{1,2}(?:st|nd|rd|th|s|'s)?[\.\)\-:]*\s*",
+      caseSensitive: false,
+    );
+    cleaned = cleaned.replaceFirst(markerPattern, '');
+    cleaned = cleaned.replaceFirst(RegExp(r'^[\-\u2022•]+\s*'), '');
+    return cleaned.trimLeft();
   }
 
   String _mapPlatformError(PlatformException exception) {
@@ -725,5 +699,405 @@ class _AttachmentChipStrip extends StatelessWidget {
       return cleaned;
     }
     return '${cleaned.substring(0, maxChars)}…';
+  }
+}
+
+class _QuestionEntry {
+  const _QuestionEntry({required this.text, this.isCustom = false});
+
+  final String text;
+  final bool isCustom;
+}
+
+class _VisitHeroCard extends StatelessWidget {
+  const _VisitHeroCard({
+    required this.info,
+    required this.isGenerating,
+    required this.processingAttachments,
+  });
+
+  final VisitInfo info;
+  final bool isGenerating;
+  final bool processingAttachments;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final formattedDate = DateFormat.yMMMMd().format(info.visitDate);
+    final statusText =
+        processingAttachments ? 'Enhancing with attachments…' : 'AI is preparing';
+    final statusColor =
+        processingAttachments ? Colors.orange.shade600 : AppColors.primaryBlue;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFE7F0FF), Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  info.visitName,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (isGenerating)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: statusColor,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        statusText,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: statusColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            formattedDate,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _HeroChip(
+                icon: Icons.person_outline,
+                label: info.doctorName.isEmpty ? 'Doctor TBD' : info.doctorName,
+              ),
+              _HeroChip(
+                icon: Icons.location_city_outlined,
+                label: info.hospitalName.isEmpty
+                    ? 'Hospital TBD'
+                    : info.hospitalName,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroChip extends StatelessWidget {
+  const _HeroChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: AppColors.primaryBlue),
+          const SizedBox(width: 6),
+          Text(label),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttachmentStatusCard extends StatelessWidget {
+  const _AttachmentStatusCard({
+    required this.message,
+    required this.icon,
+    this.accentColor,
+  });
+
+  final String message;
+  final IconData icon;
+  final Color? accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = accentColor ?? AppColors.primaryBlue;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuestionCard extends StatelessWidget {
+  const _QuestionCard({
+    required this.index,
+    required this.entry,
+    required this.showSpinner,
+    this.onRemove,
+  });
+
+  final int index;
+  final _QuestionEntry entry;
+  final bool showSpinner;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: entry.isCustom ? Colors.white : AppColors.lightBlue,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: entry.isCustom
+              ? theme.colorScheme.outline.withValues(alpha: 0.4)
+              : Colors.transparent,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.2),
+            child: Text(
+              '$index',
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: AppColors.primaryBlue,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.text,
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (entry.isCustom)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.primaryBlue),
+                      ),
+                      child: Text(
+                        'Added by you',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: AppColors.primaryBlue,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (showSpinner || onRemove != null)
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (onRemove != null)
+                  IconButton(
+                    tooltip: 'Remove question',
+                    onPressed: onRemove,
+                    icon: const Icon(Icons.close),
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 20,
+                  ),
+                if (showSpinner) ...[
+                  if (onRemove != null) const SizedBox(height: 6),
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ],
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusCard extends StatelessWidget {
+  const _StatusCard({
+    required this.icon,
+    required this.message,
+    this.accentColor,
+  });
+
+  final IconData icon;
+  final String message;
+  final Color? accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = accentColor ?? AppColors.mutedText;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: color,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomActionBar extends StatelessWidget {
+  const _BottomActionBar({
+    required this.isSaving,
+    required this.onSave,
+    required this.onRegenerate,
+    required this.isGenerating,
+    this.saveError,
+  });
+
+  final bool isSaving;
+  final VoidCallback? onSave;
+  final VoidCallback? onRegenerate;
+  final bool isGenerating;
+  final String? saveError;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 22,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          FilledButton.icon(
+            onPressed: isSaving ? null : onSave,
+            icon: isSaving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.check_circle_outline),
+            label: Text(isSaving ? 'Saving…' : 'Save to folder'),
+          ),
+          if (saveError != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                saveError!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: onRegenerate,
+            icon: const Icon(Icons.refresh),
+            label: Text(isGenerating ? 'Generating…' : 'Regenerate'),
+          ),
+        ],
+      ),
+    );
   }
 }

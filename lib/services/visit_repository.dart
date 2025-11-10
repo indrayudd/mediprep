@@ -128,6 +128,95 @@ class VisitRepository extends ChangeNotifier {
     return visit;
   }
 
+  Future<void> updateFolderDetails({
+    required String folderId,
+    required String patientName,
+    required String conditionName,
+    required String primaryDoctor,
+    required String primaryHospital,
+  }) async {
+    final index = _folders.indexWhere((folder) => folder.id == folderId);
+    if (index == -1) {
+      throw StateError('Folder $folderId not found');
+    }
+    final updatedFolder = _folders[index].copyWith(
+      patientName: patientName,
+      conditionName: conditionName,
+      primaryDoctor: primaryDoctor,
+      primaryHospital: primaryHospital,
+      updatedAt: DateTime.now(),
+    );
+    _folders[index] = updatedFolder;
+    _folders.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> updateVisitDetails({
+    required String folderId,
+    required String visitId,
+    required String title,
+    required DateTime visitDate,
+    required String description,
+  }) async {
+    final folderIndex = _folders.indexWhere((folder) => folder.id == folderId);
+    if (folderIndex == -1) {
+      throw StateError('Folder $folderId not found');
+    }
+    final visits = [..._folders[folderIndex].visits];
+    final visitIndex = visits.indexWhere((visit) => visit.id == visitId);
+    if (visitIndex == -1) {
+      throw StateError('Visit $visitId not found');
+    }
+    final updatedVisit = visits[visitIndex].copyWith(
+      title: title,
+      visitDate: visitDate,
+      description: description,
+      updatedAt: DateTime.now(),
+    );
+    visits[visitIndex] = updatedVisit;
+    visits.sort((a, b) => b.visitDate.compareTo(a.visitDate));
+    _folders[folderIndex] = _folders[folderIndex].copyWith(
+      visits: visits,
+      updatedAt: DateTime.now(),
+    );
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> deleteFolder(String folderId) async {
+    final removed = _folders.where((folder) => folder.id != folderId).toList();
+    if (removed.length == _folders.length) {
+      throw StateError('Folder $folderId not found');
+    }
+    removed.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    _folders = removed;
+    notifyListeners();
+    await _persist();
+  }
+
+  Future<void> deleteVisit({
+    required String folderId,
+    required String visitId,
+  }) async {
+    final folderIndex = _folders.indexWhere((folder) => folder.id == folderId);
+    if (folderIndex == -1) {
+      throw StateError('Folder $folderId not found');
+    }
+    final visits =
+        _folders[folderIndex].visits.where((visit) => visit.id != visitId).toList();
+    if (visits.length == _folders[folderIndex].visits.length) {
+      throw StateError('Visit $visitId not found');
+    }
+    visits.sort((a, b) => b.visitDate.compareTo(a.visitDate));
+    _folders[folderIndex] = _folders[folderIndex].copyWith(
+      visits: visits,
+      updatedAt: DateTime.now(),
+    );
+    notifyListeners();
+    await _persist();
+  }
+
   Future<void> updateQuestions({
     required String folderId,
     required String visitId,

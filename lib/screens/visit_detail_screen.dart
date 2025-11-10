@@ -1,16 +1,17 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../data/question_note.dart';
-import '../data/recording_meta.dart';
 import '../data/visit_folder.dart';
 import '../data/visit_record.dart';
 import '../models/llm_model.dart';
 import '../services/visit_repository.dart';
-import '../widgets/recording_dock.dart';
+import '../widgets/recording_overlay.dart';
 
-class VisitDetailScreen extends StatelessWidget {
+class VisitDetailScreen extends StatefulWidget {
   const VisitDetailScreen({
     super.key,
     required this.folderId,
@@ -25,11 +26,38 @@ class VisitDetailScreen extends StatelessWidget {
   final VoidCallback onChangeModel;
 
   @override
+  State<VisitDetailScreen> createState() => _VisitDetailScreenState();
+}
+
+class _VisitDetailScreenState extends State<VisitDetailScreen> {
+  late final String _overlayOwnerId =
+      'visit_${widget.visitId}_${DateTime.now().microsecondsSinceEpoch}';
+  RecordingOverlayController? _overlayController;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _overlayController ??= context.read<RecordingOverlayController>();
+  }
+
+  @override
+  void dispose() {
+    _overlayController?.detachPanel(_overlayOwnerId);
+    super.dispose();
+  }
+
+  @override
+  void deactivate() {
+    _overlayController?.detachPanel(_overlayOwnerId);
+    super.deactivate();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Consumer<VisitRepository>(
       builder: (_, repository, __) {
-        final folder = repository.getFolderById(folderId);
-        final visit = repository.getVisitById(folderId, visitId);
+        final folder = repository.getFolderById(widget.folderId);
+        final visit = repository.getVisitById(widget.folderId, widget.visitId);
         if (folder == null || visit == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Visit details')),
@@ -38,130 +66,282 @@ class VisitDetailScreen extends StatelessWidget {
             ),
           );
         }
+        final overlayConfig = RecordingOverlayConfig(
+          ensureContext: () async => RecordingSessionContext(
+            folderId: widget.folderId,
+            visitId: visit.id,
+            visitTitle: visit.title,
+            visitDate: visit.visitDate,
+          ),
+          onRecordingSaved: (ctx, recording) async {
+            await repository.addRecording(
+              folderId: ctx.folderId,
+              visitId: ctx.visitId,
+              recording: recording,
+            );
+          },
+          title: visit.title,
+          date: visit.visitDate,
+          visitId: visit.id,
+          onOpenVisit: (navigator) async {
+            await navigator.push(
+              MaterialPageRoute(
+                builder: (_) => VisitDetailScreen(
+                  folderId: widget.folderId,
+                  visitId: widget.visitId,
+                  model: widget.model,
+                  onChangeModel: widget.onChangeModel,
+                ),
+              ),
+            );
+          },
+        );
+        _scheduleOverlayAttach(visit, overlayConfig);
 
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(visit.title),
-            actions: [
+        return Consumer<RecordingOverlayController>(
+          builder: (context, overlayController, _) {
+            final bottomInset =
+                overlayController.isPanelVisibleFor(_overlayOwnerId)
+                    ? 110.0
+                    : 80.0;
+            return Scaffold(
+              appBar: AppBar(
+                title: Text(visit.title),
+                actions: [
               IconButton(
                 tooltip: 'Change AI model',
-                onPressed: onChangeModel,
-                icon: const Icon(Icons.auto_awesome),
+                onPressed: widget.onChangeModel,
+                icon: const Icon(Icons.settings),
               ),
-            ],
-          ),
-          body: RecordingDock(
-            enabled: true,
-            ensureContext: () async => RecordingSessionContext(
-              folderId: folderId,
-              visitId: visit.id,
-              visitTitle: visit.title,
-              visitDate: visit.visitDate,
-            ),
-            onRecordingSaved: (ctx, recording) async {
-              await repository.addRecording(
-                folderId: ctx.folderId,
-                visitId: ctx.visitId,
-                recording: recording,
-              );
-            },
-            onError: (error) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Recording failed: $error')),
-              );
-            },
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _VisitSummaryCard(folder: folder, visit: visit),
-                const SizedBox(height: 24),
-                _SectionLabel(
-                  label: 'Questions',
-                  trailing: Text(
-                    '${visit.questions.length} items',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (visit.questions.isEmpty)
-                  const _EmptyQuestions()
-                else
-                  ...visit.questions.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final question = entry.value;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _QuestionCard(
-                        index: index + 1,
-                        question: question,
+                ],
+              ),
+              body: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _VisitSummaryCard(folder: folder, visit: visit),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SectionLabel(
+                          label: 'Questions',
+                          trailing: Text(
+                            '${visit.questions.length} items',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
                       ),
-                    );
-                  }),
-                const SizedBox(height: 24),
-                _SectionLabel(
-                  label: 'Recordings',
-                  trailing: Text(
-                    '${visit.recordings.length} items',
-                    style: Theme.of(context).textTheme.bodySmall,
+                      TextButton.icon(
+                        onPressed: () => _showAddQuestionSheet(
+                          repository,
+                          visit,
+                          overlayConfig,
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Add more'),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                if (visit.recordings.isEmpty)
-                  const _EmptyRecordings()
-                else
-                  ...visit.recordings.map(
-                    (recording) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _RecordingTile(recording: recording),
-                    ),
-                  ),
-                if (visit.attachments.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  if (visit.questions.isEmpty)
+                    const _EmptyQuestions()
+                  else
+                    ...visit.questions.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final question = entry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _QuestionCard(
+                          index: index + 1,
+                          question: question,
+                          onRemove: () => _removeQuestion(
+                            repository,
+                            visit,
+                            question,
+                          ),
+                        ),
+                      );
+                    }),
                   const SizedBox(height: 24),
                   _SectionLabel(
-                    label: 'Attachments',
+                    label: 'Recorded answers',
                     trailing: Text(
-                      '${visit.attachments.length} files',
+                      '${visit.recordings.length} items',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: visit.attachments
-                        .map(
-                          (attachment) => Chip(
-                            avatar: const Icon(Icons.attach_file, size: 18),
-                            label: Text(attachment.name),
-                          ),
-                        )
-                        .toList(),
+                  RecordingListSection(
+                    recordings: visit.recordings,
+                    config: overlayConfig,
                   ),
-                ],
-                if (visit.description.isNotEmpty) ...[
-                  const SizedBox(height: 24),
-                  _SectionLabel(label: 'Notes'),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(16),
+                  if (visit.attachments.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    _SectionLabel(
+                      label: 'Attachments',
+                      trailing: Text(
+                        '${visit.attachments.length} files',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                     ),
-                    child: Text(
-                      visit.description,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: visit.attachments
+                          .map(
+                            (attachment) => Chip(
+                              avatar: const Icon(Icons.attach_file, size: 18),
+                              label: Text(attachment.name),
+                            ),
+                          )
+                          .toList(),
                     ),
-                  ),
+                  ],
+                  if (visit.description.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    _SectionLabel(label: 'Notes'),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        visit.description,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                  SizedBox(height: bottomInset),
                 ],
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
   }
+
+  Future<void> _removeQuestion(
+    VisitRepository repository,
+    VisitRecord visit,
+    QuestionNote question,
+  ) async {
+    final updated = List<QuestionNote>.from(visit.questions)
+      ..removeWhere((note) => note.id == question.id);
+    if (updated.length == visit.questions.length) {
+      return;
+    }
+    try {
+      await repository.updateQuestions(
+        folderId: widget.folderId,
+        visitId: visit.id,
+        questions: updated,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to remove question: $error')),
+      );
+    }
+  }
+
+  void _scheduleOverlayAttach(
+    VisitRecord visit,
+    RecordingOverlayConfig config,
+  ) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final overlay = _overlayController;
+      if (overlay == null) return;
+      overlay.attachPanel(_overlayOwnerId, config);
+    });
+  }
+
+  Future<void> _showAddQuestionSheet(
+    VisitRepository repository,
+    VisitRecord visit,
+    RecordingOverlayConfig overlayConfig,
+  ) async {
+    final controller = TextEditingController();
+    _overlayController?.detachPanel(_overlayOwnerId);
+    String? result;
+    try {
+      result = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        builder: (context) {
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              top: 24,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add a custom question',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    hintText: 'What else would you like to ask the doctor?',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      final value = controller.text.trim();
+                      if (value.isEmpty) return;
+                      Navigator.of(context).pop(value);
+                    },
+                    child: const Text('Add question'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    } finally {
+      if (mounted) {
+        _overlayController?.attachPanel(_overlayOwnerId, overlayConfig);
+      }
+    }
+
+    if (result == null || result.trim().isEmpty) return;
+    final newQuestion = QuestionNote(
+      id: _generateId(),
+      text: result.trim(),
+      createdAt: DateTime.now(),
+      isCustom: true,
+    );
+    final questions = [...visit.questions, newQuestion];
+    await repository.updateQuestions(
+      folderId: widget.folderId,
+      visitId: visit.id,
+      questions: questions,
+    );
+  }
+
+  String _generateId() =>
+      '${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(1 << 16)}';
 }
 
 class _VisitSummaryCard extends StatelessWidget {
@@ -255,10 +435,15 @@ class _SummaryChip extends StatelessWidget {
 }
 
 class _QuestionCard extends StatelessWidget {
-  const _QuestionCard({required this.index, required this.question});
+  const _QuestionCard({
+    required this.index,
+    required this.question,
+    this.onRemove,
+  });
 
   final int index;
   final QuestionNote question;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +466,7 @@ class _QuestionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
                 radius: 16,
@@ -305,22 +491,32 @@ class _QuestionCard extends StatelessWidget {
                 ),
               ),
               if (question.isCustom)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.secondaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    'You',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSecondaryContainer,
-                      fontWeight: FontWeight.bold,
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'You',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSecondaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
+                ),
+              if (onRemove != null)
+                IconButton(
+                  tooltip: 'Remove question',
+                  icon: const Icon(Icons.close),
+                  onPressed: onRemove,
+                  visualDensity: VisualDensity.compact,
                 ),
             ],
           ),
@@ -343,78 +539,6 @@ class _QuestionCard extends StatelessWidget {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _RecordingTile extends StatelessWidget {
-  const _RecordingTile({required this.recording});
-
-  final RecordingMeta recording;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final duration = Duration(seconds: recording.durationSeconds);
-    final durationText =
-        '${duration.inMinutes.remainder(60).toString().padLeft(2, '0')}:${(duration.inSeconds.remainder(60)).toString().padLeft(2, '0')}';
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(
-              Icons.play_arrow_rounded,
-              size: 32,
-              color: theme.colorScheme.primary,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  recording.displayName ?? 'Recording',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  durationText,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Playback is coming soon. Recordings are safely stored.',
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.play_circle_fill),
-          ),
         ],
       ),
     );
@@ -444,37 +568,6 @@ class _EmptyQuestions extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'Generate or add your questions to prepare for the appointment.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyRecordings extends StatelessWidget {
-  const _EmptyRecordings();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.mic_none_outlined, size: 32, color: Colors.grey),
-          const SizedBox(height: 8),
-          Text(
-            'No recordings yet',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Capture conversations with your doctor to revisit later.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],

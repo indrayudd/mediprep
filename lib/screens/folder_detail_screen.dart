@@ -6,6 +6,7 @@ import '../data/visit_folder.dart';
 import '../data/visit_record.dart';
 import '../models/llm_model.dart';
 import '../services/visit_repository.dart';
+import '../widgets/edit_sheets.dart';
 import 'visit_detail_screen.dart';
 import 'visit_form_screen.dart';
 
@@ -35,6 +36,127 @@ class FolderDetailScreen extends StatelessWidget {
           );
         }
 
+        final messenger = ScaffoldMessenger.of(context);
+        final navigator = Navigator.of(context);
+
+        Future<void> handleEditFolder() async {
+          final result = await showFolderEditSheet(
+            context: context,
+            folder: folder,
+          );
+          if (result == null) return;
+          try {
+            await repository.updateFolderDetails(
+              folderId: folder.id,
+              patientName: result.patientName,
+              conditionName: result.conditionName,
+              primaryDoctor: result.primaryDoctor,
+              primaryHospital: result.primaryHospital,
+            );
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Folder updated.')),
+            );
+          } catch (error) {
+            messenger.showSnackBar(
+              SnackBar(content: Text('Unable to update folder: $error')),
+            );
+          }
+        }
+
+        Future<void> handleDeleteFolder() async {
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Delete folder?'),
+              content: const Text(
+                'This folder and all related visits will be permanently removed.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Delete'),
+                ),
+              ],
+            ),
+          );
+          if (confirm != true) return;
+          try {
+            await repository.deleteFolder(folder.id);
+            navigator.pop();
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Folder deleted.')),
+            );
+          } catch (error) {
+            messenger.showSnackBar(
+              SnackBar(content: Text('Unable to delete folder: $error')),
+            );
+          }
+        }
+
+        Future<void> handleEditVisit(VisitRecord visit) async {
+          final result = await showVisitEditSheet(
+            context: context,
+            visit: visit,
+          );
+          if (result == null) return;
+          try {
+            await repository.updateVisitDetails(
+              folderId: folder.id,
+              visitId: visit.id,
+              title: result.title,
+              visitDate: result.visitDate,
+              description: result.description,
+            );
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Visit updated.')),
+            );
+          } catch (error) {
+            messenger.showSnackBar(
+              SnackBar(content: Text('Unable to update visit: $error')),
+            );
+          }
+        }
+
+        Future<void> handleDeleteVisit(VisitRecord visit) async {
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Delete visit?'),
+              content: Text(
+                'Remove "${visit.title}" and all its notes/recordings?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Delete'),
+                ),
+              ],
+            ),
+          );
+          if (confirm != true) return;
+          try {
+            await repository.deleteVisit(
+              folderId: folder.id,
+              visitId: visit.id,
+            );
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Visit deleted.')),
+            );
+          } catch (error) {
+            messenger.showSnackBar(
+              SnackBar(content: Text('Unable to delete visit: $error')),
+            );
+          }
+        }
+
         return Scaffold(
           appBar: AppBar(
             title: Text(folder.conditionName),
@@ -42,7 +164,38 @@ class FolderDetailScreen extends StatelessWidget {
               IconButton(
                 tooltip: 'Change AI model',
                 onPressed: onChangeModel,
-                icon: const Icon(Icons.auto_awesome),
+                icon: const Icon(Icons.settings),
+              ),
+              PopupMenuButton<_FolderAction>(
+                tooltip: 'Folder actions',
+                onSelected: (action) {
+                  switch (action) {
+                    case _FolderAction.edit:
+                      handleEditFolder();
+                      break;
+                    case _FolderAction.delete:
+                      handleDeleteFolder();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _FolderAction.edit,
+                    child: ListTile(
+                      leading: Icon(Icons.edit_outlined),
+                      title: Text('Edit folder'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _FolderAction.delete,
+                    child: ListTile(
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete folder'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -91,6 +244,8 @@ class FolderDetailScreen extends StatelessWidget {
                           ),
                         );
                       },
+                      onEdit: () => handleEditVisit(visit),
+                      onDelete: () => handleDeleteVisit(visit),
                     ),
                   ),
                 ),
@@ -191,10 +346,17 @@ class _HeaderChip extends StatelessWidget {
 }
 
 class _VisitTile extends StatelessWidget {
-  const _VisitTile({required this.visit, required this.onTap});
+  const _VisitTile({
+    required this.visit,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   final VisitRecord visit;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -253,10 +415,39 @@ class _VisitTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              Icon(
-                Icons.chevron_right,
-                color: theme.colorScheme.onSurfaceVariant,
+              PopupMenuButton<_VisitAction>(
+                tooltip: 'Visit actions',
+                onSelected: (action) {
+                  switch (action) {
+                    case _VisitAction.edit:
+                      onEdit();
+                      break;
+                    case _VisitAction.delete:
+                      onDelete();
+                      break;
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: _VisitAction.edit,
+                    child: ListTile(
+                      leading: Icon(Icons.edit_outlined),
+                      title: Text('Edit visit'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _VisitAction.delete,
+                    child: ListTile(
+                      leading: Icon(Icons.delete_outline),
+                      title: Text('Delete visit'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
               ),
+              Icon(Icons.chevron_right,
+                  color: theme.colorScheme.onSurfaceVariant),
             ],
           ),
         ),
@@ -292,3 +483,7 @@ class _EmptyVisits extends StatelessWidget {
     );
   }
 }
+
+enum _FolderAction { edit, delete }
+
+enum _VisitAction { edit, delete }

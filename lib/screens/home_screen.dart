@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../data/visit_folder.dart';
 import '../models/llm_model.dart';
 import '../services/visit_repository.dart';
+import '../widgets/edit_sheets.dart';
 import 'folder_detail_screen.dart';
 import 'visit_form_screen.dart';
 
@@ -58,6 +59,74 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _editFolder(VisitFolder folder) async {
+    final repository = context.read<VisitRepository>();
+    final result = await showFolderEditSheet(
+      context: context,
+      folder: folder,
+    );
+    if (result == null) return;
+    try {
+      await repository.updateFolderDetails(
+        folderId: folder.id,
+        patientName: result.patientName,
+        conditionName: result.conditionName,
+        primaryDoctor: result.primaryDoctor,
+        primaryHospital: result.primaryHospital,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Folder updated.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to update folder: $error')),
+      );
+    }
+  }
+
+  Future<void> _deleteFolder(VisitFolder folder) async {
+    final repository = context.read<VisitRepository>();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final visitCount = folder.visits.length;
+        final suffix =
+            visitCount == 1 ? 'This visit will be deleted.' : '$visitCount visits will be deleted.';
+        return AlertDialog(
+          title: const Text('Delete folder?'),
+          content: Text(
+            'This folder and all associated visits will be permanently removed. $suffix',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirm != true) return;
+    try {
+      await repository.deleteFolder(folder.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Folder deleted.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to delete folder: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final repository = context.watch<VisitRepository>();
@@ -80,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             tooltip: 'Change AI model',
             onPressed: widget.onChangeModel,
-            icon: const Icon(Icons.auto_awesome),
+            icon: const Icon(Icons.settings),
           ),
         ],
       ),
@@ -102,27 +171,29 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Expanded(
-              child: filtered.isEmpty
-                  ? _EmptyState(onCreate: _openVisitForm)
-                  : ListView.separated(
-                      itemBuilder: (_, index) {
-                        final folder = filtered[index];
-                        return _FolderCard(
-                          folder: folder,
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => FolderDetailScreen(
-                                  model: widget.model,
-                                  folderId: folder.id,
-                                  onChangeModel: widget.onChangeModel,
-                                ),
-                              ),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? _EmptyState(onCreate: _openVisitForm)
+                      : ListView.separated(
+                          itemBuilder: (_, index) {
+                            final folder = filtered[index];
+                            return _FolderCard(
+                              folder: folder,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => FolderDetailScreen(
+                                      model: widget.model,
+                                      folderId: folder.id,
+                                      onChangeModel: widget.onChangeModel,
+                                    ),
+                                  ),
+                                );
+                              },
+                              onEdit: () => _editFolder(folder),
+                              onDelete: () => _deleteFolder(folder),
                             );
                           },
-                        );
-                      },
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemCount: filtered.length,
                     ),
@@ -166,10 +237,17 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _FolderCard extends StatelessWidget {
-  const _FolderCard({required this.folder, required this.onTap});
+  const _FolderCard({
+    required this.folder,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   final VisitFolder folder;
   final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -222,6 +300,38 @@ class _FolderCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  PopupMenuButton<_FolderMenuAction>(
+                    tooltip: 'Folder actions',
+                    onSelected: (action) {
+                      switch (action) {
+                        case _FolderMenuAction.edit:
+                          onEdit();
+                          break;
+                        case _FolderMenuAction.delete:
+                          onDelete();
+                          break;
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: _FolderMenuAction.edit,
+                        child: ListTile(
+                          leading: Icon(Icons.edit_outlined),
+                          title: Text('Edit details'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: _FolderMenuAction.delete,
+                        child: ListTile(
+                          leading: Icon(Icons.delete_outline),
+                          title: Text('Delete folder'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 4),
                   Icon(
                     Icons.arrow_forward_ios,
                     size: 16,
@@ -295,3 +405,5 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
+
+enum _FolderMenuAction { edit, delete }
