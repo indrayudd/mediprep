@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +11,7 @@ import 'package:flutter/scheduler.dart';
 import '../data/recording_meta.dart';
 import '../theme/app_colors.dart';
 import '../services/audio_recorder_service.dart';
+import 'animated_waveform.dart';
 
 class RecordingSessionContext {
   RecordingSessionContext({
@@ -437,23 +439,35 @@ class RecordingOverlayHost extends StatelessWidget {
       children: [
         child,
         if (showBanner)
-          Positioned(
-            top: 0,
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            top: showBanner ? 0 : -100,
             left: 0,
             right: 0,
-            child: Material(
-              color: Colors.transparent,
-              child: _RecordingBanner(controller: controller),
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 300),
+              opacity: showBanner ? 1.0 : 0.0,
+              child: Material(
+                color: Colors.transparent,
+                child: _RecordingBanner(controller: controller),
+              ),
             ),
           ),
         if (showPanel)
-          Positioned(
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            bottom: showPanel ? 0 : -200,
             left: 0,
             right: 0,
-            bottom: 0,
-            child: Material(
-              color: Colors.transparent,
-              child: _RecordingOverlayPanel(controller: controller),
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 300),
+              opacity: showPanel ? 1.0 : 0.0,
+              child: Material(
+                color: Colors.transparent,
+                child: _RecordingOverlayPanel(controller: controller),
+              ),
             ),
           ),
       ],
@@ -473,37 +487,44 @@ class _RecordingBanner extends StatelessWidget {
       bottom: false,
       child: GestureDetector(
         onTap: () => controller.openVisit(),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          margin: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: isRecording ? Colors.red : AppColors.primaryBlue,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isRecording ? Icons.mic : Icons.play_circle_fill,
-                color: Colors.white,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              margin: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: (isRecording ? Colors.red : AppColors.primaryBlue).withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  isRecording ? 'Recording in progress' : 'Playing recording',
-                  style: const TextStyle(
+              child: Row(
+                children: [
+                  Icon(
+                    isRecording ? Icons.mic : Icons.play_circle_fill,
                     color: Colors.white,
-                    fontWeight: FontWeight.w600,
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      isRecording ? 'Recording in progress' : 'Playing recording',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: controller.isRecording || controller.isPlaying
+                        ? controller.stopCurrentSession
+                        : null,
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text('Stop'),
+                  ),
+                ],
               ),
-              TextButton(
-                onPressed: controller.isRecording || controller.isPlaying
-                    ? controller.stopCurrentSession
-                    : null,
-                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                child: const Text('Stop'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -539,150 +560,160 @@ class _RecordingOverlayPanel extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(28),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 16,
-                offset: const Offset(0, -4),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          config.title,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          DateFormat.yMMMMd().format(config.date),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.8),
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
                   ),
-                  if (showOpenButton)
-                    IconButton(
-                      onPressed: controller.openVisit,
-                      icon: const Icon(Icons.open_in_new),
-                    ),
-                  if (showPlaybackState)
-                    IconButton(
-                      onPressed: controller.closePlaybackPanel,
-                      icon: const Icon(Icons.close),
-                    ),
                 ],
               ),
-              const SizedBox(height: 10),
-              if (showRecordingState)
-                Row(
-                  children: [
-                    Expanded(child: _Waveform(amplitude: controller.amplitude)),
-                    const SizedBox(width: 12),
-                    Text(
-                      _format(controller.elapsed),
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                )
-              else if (showPlaybackState)
-                Column(
-                  children: [
-                    const SizedBox(height: 4),
-                    _PlaybackProgressBar(controller: controller),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(_format(controller.playbackPosition)),
-                        Text(_format(controller.playbackDuration)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.replay_5),
-                          onPressed: () => controller.seekPlayback(
-                            const Duration(seconds: -5),
-                          ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              config.title,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              DateFormat.yMMMMd().format(config.date),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.forward_5),
-                          onPressed: () => controller.seekPlayback(
-                            const Duration(seconds: 5),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              else if (showIdleState)
-                Text(
-                  'Tap to capture answers or summaries in your own voice.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () => controller.handlePrimaryButton(config),
-                child: Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: showPlaybackState ? AppColors.primaryBlue : Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.08),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6),
                       ),
+                      if (showOpenButton)
+                        IconButton(
+                          onPressed: controller.openVisit,
+                          icon: const Icon(Icons.open_in_new),
+                        ),
+                      if (showPlaybackState)
+                        IconButton(
+                          onPressed: controller.closePlaybackPanel,
+                          icon: const Icon(Icons.close),
+                        ),
                     ],
                   ),
-                  child: Center(
+                  const SizedBox(height: 10),
+                  if (showRecordingState)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AnimatedWaveform(amplitude: controller.amplitude),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          _format(controller.elapsed),
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (showPlaybackState)
+                    Column(
+                      children: [
+                        const SizedBox(height: 4),
+                        _PlaybackProgressBar(controller: controller),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(_format(controller.playbackPosition)),
+                            Text(_format(controller.playbackDuration)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.replay_5),
+                              onPressed: () => controller.seekPlayback(
+                                const Duration(seconds: -5),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.forward_5),
+                              onPressed: () => controller.seekPlayback(
+                                const Duration(seconds: 5),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    )
+                  else if (showIdleState)
+                    Text(
+                      'Tap to capture answers or summaries in your own voice.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  const SizedBox(height: 12),
+                  GestureDetector(
+                    onTap: () => controller.handlePrimaryButton(config),
                     child: Container(
-                      width: 44,
-                      height: 44,
+                      width: 64,
+                      height: 64,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: showPlaybackState ? Colors.white : Colors.white,
+                        color: showPlaybackState ? AppColors.primaryBlue : Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 16,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
-                      child: _PrimaryGlyph(
-                        showPlaybackState: showPlaybackState,
-                        isPlaybackActive: isPlaybackActive,
-                        isPlaybackCompleted: isPlaybackCompleted,
-                        showRecordingState: showRecordingState,
+                      child: Center(
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: showPlaybackState ? Colors.white : Colors.white,
+                          ),
+                          child: _PrimaryGlyph(
+                            showPlaybackState: showPlaybackState,
+                            isPlaybackActive: isPlaybackActive,
+                            isPlaybackCompleted: isPlaybackCompleted,
+                            showRecordingState: showRecordingState,
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
+
   }
 
   String _format(Duration duration) {
@@ -786,41 +817,8 @@ class _PlaybackProgressBar extends StatelessWidget {
   }
 }
 
-class _Waveform extends StatelessWidget {
-  const _Waveform({required this.amplitude});
 
-  final double amplitude;
-
-  @override
-  Widget build(BuildContext context) {
-    final bars = List.generate(18, (index) {
-      final value = sin((amplitude * 4) + index);
-      return 12 + (value.abs() * 30);
-    });
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: bars
-          .map(
-            (height) => AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: 4,
-              height: height,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(2),
-                gradient: const LinearGradient(
-                  colors: [Color(0xFFFF6F6F), Color(0xFFFFB4B4)],
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                ),
-              ),
-            ),
-          )
-          .toList(),
-    );
-  }
-}
-
-class RecordingListSection extends StatelessWidget {
+class RecordingListSection extends StatefulWidget {
   const RecordingListSection({
     super.key,
     required this.config,
@@ -831,8 +829,32 @@ class RecordingListSection extends StatelessWidget {
   final List<RecordingMeta> recordings;
 
   @override
+  State<RecordingListSection> createState() => _RecordingListSectionState();
+}
+
+class _RecordingListSectionState extends State<RecordingListSection>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (recordings.isEmpty) {
+    if (widget.recordings.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -847,18 +869,39 @@ class RecordingListSection extends StatelessWidget {
       );
     }
 
-    return Column(
-      children: recordings
-          .map(
-            (recording) => Padding(
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: widget.recordings.length,
+      itemBuilder: (context, index) {
+        final recording = widget.recordings[index];
+        final animation = Tween<double>(begin: 0.0, end: 1.0).animate(
+          CurvedAnimation(
+            parent: _controller,
+            curve: Interval(
+              (1 / widget.recordings.length) * index,
+              1.0,
+              curve: Curves.easeOut,
+            ),
+          ),
+        );
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.5),
+              end: Offset.zero,
+            ).animate(animation),
+            child: Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: _RecordingTile(
                 recording: recording,
-                config: config,
+                config: widget.config,
               ),
             ),
-          )
-          .toList(),
+          ),
+        );
+      },
     );
   }
 }
@@ -874,6 +917,7 @@ class _RecordingTile extends StatefulWidget {
 }
 
 class _RecordingTileState extends State<_RecordingTile> {
+  bool _isPressed = false;
   bool _hasPlayed = false;
 
   @override
@@ -884,70 +928,95 @@ class _RecordingTileState extends State<_RecordingTile> {
         '${duration.inMinutes.remainder(60).toString().padLeft(2, '0')}:${(duration.inSeconds.remainder(60)).toString().padLeft(2, '0')}';
     final recordedOn = DateFormat.MMMd().format(widget.recording.createdAt);
 
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: AppColors.lightBlue,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: const Icon(Icons.graphic_eq, color: AppColors.primaryBlue),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.recording.displayName ?? 'Recording',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
+      onTap: () async {
+        final controller = context.read<RecordingOverlayController>();
+        await controller.startPlayback(
+          widget.config,
+          widget.recording,
+        );
+        if (!mounted) return;
+        setState(() {
+          _hasPlayed = true;
+        });
+      },
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 1.0, end: _isPressed ? 0.95 : 1.0),
+        duration: const Duration(milliseconds: 100),
+        builder: (context, scale, child) {
+          return Transform.scale(
+            scale: scale,
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '$recordedOn · $durationText',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: AppColors.lightBlue,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: const Icon(Icons.graphic_eq, color: AppColors.primaryBlue),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.recording.displayName ?? 'Recording',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '$recordedOn · $durationText',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () async {
+                      final controller = context.read<RecordingOverlayController>();
+                      await controller.startPlayback(
+                        widget.config,
+                        widget.recording,
+                      );
+                      if (!mounted) return;
+                      setState(() {
+                        _hasPlayed = true;
+                      });
+                    },
+                    icon: Icon(
+                      _hasPlayed ? Icons.replay_circle_filled : Icons.play_circle_fill,
+                      size: 32,
+                      color: AppColors.primaryBlue,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          IconButton(
-            onPressed: () async {
-              final controller = context.read<RecordingOverlayController>();
-              await controller.startPlayback(
-                widget.config,
-                widget.recording,
-              );
-              if (!mounted) return;
-              setState(() {
-                _hasPlayed = true;
-              });
-            },
-            icon: Icon(
-              _hasPlayed ? Icons.replay_circle_filled : Icons.play_circle_fill,
-              size: 32,
-              color: AppColors.primaryBlue,
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
