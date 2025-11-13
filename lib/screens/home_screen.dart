@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:cupertino_native/cupertino_native.dart';
 
 import '../data/visit_folder.dart';
 import '../models/llm_model.dart';
@@ -145,61 +146,60 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('MediPrep'),
-        actions: [
-          IconButton(
-            tooltip: 'Change AI model',
-            onPressed: widget.onChangeModel,
-            icon: const Icon(Icons.settings),
+      ),
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: filtered.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.only(bottom: 120),
+                    child: _EmptyState(onCreate: _openVisitForm),
+                  )
+                : ListView.separated(
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 12, 16, 100), // button gap
+                    itemBuilder: (_, index) {
+                      final folder = filtered[index];
+                      return _FolderCard(
+                        folder: folder,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => FolderDetailScreen(
+                                model: widget.model,
+                                folderId: folder.id,
+                                onChangeModel: widget.onChangeModel,
+                              ),
+                            ),
+                          );
+                        },
+                        onEdit: () => _editFolder(folder),
+                        onDelete: () => _deleteFolder(folder),
+                      );
+                    },
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemCount: filtered.length,
+                  ),
+          ),
+          Positioned(
+            bottom: 24,
+            left: 24,
+            child: CNButton.icon(
+              icon: const CNSymbol('gearshape.fill'),
+              onPressed: widget.onChangeModel,
+              style: CNButtonStyle.glass,
+            ),
+          ),
+          Positioned(
+            bottom: 24,
+            right: 24,
+            child: CNButton.icon(
+              icon: const CNSymbol('plus'),
+              onPressed: () => _openVisitForm(),
+              style: CNButtonStyle.glass,
+            ),
           ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openVisitForm,
-        icon: const Icon(Icons.add),
-        label: const Text('New visit'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _searchController,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: 'Search by date, doctor, patient, or condition',
-              ),
-            ),
-            const SizedBox(height: 16),
-                Expanded(
-                  child: filtered.isEmpty
-                      ? _EmptyState(onCreate: _openVisitForm)
-                      : ListView.separated(
-                          itemBuilder: (_, index) {
-                            final folder = filtered[index];
-                            return _FolderCard(
-                              folder: folder,
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => FolderDetailScreen(
-                                      model: widget.model,
-                                      folderId: folder.id,
-                                      onChangeModel: widget.onChangeModel,
-                                    ),
-                                  ),
-                                );
-                              },
-                              onEdit: () => _editFolder(folder),
-                              onDelete: () => _deleteFolder(folder),
-                            );
-                          },
-                      separatorBuilder: (_, __) => const SizedBox(height: 12),
-                      itemCount: filtered.length,
-                    ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -300,36 +300,19 @@ class _FolderCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  PopupMenuButton<_FolderMenuAction>(
-                    tooltip: 'Folder actions',
-                    onSelected: (action) {
-                      switch (action) {
-                        case _FolderMenuAction.edit:
-                          onEdit();
-                          break;
-                        case _FolderMenuAction.delete:
-                          onDelete();
-                          break;
+                  CNPopupMenuButton(
+                    buttonLabel: '...',
+                    items: const [
+                      CNPopupMenuItem(label: 'Edit details', icon: CNSymbol('pencil')),
+                      CNPopupMenuItem(label: 'Delete folder', icon: CNSymbol('trash')),
+                    ],
+                    onSelected: (index) {
+                      if (index == 0) {
+                        onEdit();
+                      } else if (index == 1) {
+                        onDelete();
                       }
                     },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: _FolderMenuAction.edit,
-                        child: ListTile(
-                          leading: Icon(Icons.edit_outlined),
-                          title: Text('Edit details'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: _FolderMenuAction.delete,
-                        child: ListTile(
-                          leading: Icon(Icons.delete_outline),
-                          title: Text('Delete folder'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ),
-                    ],
                   ),
                   const SizedBox(width: 4),
                   Icon(
@@ -405,5 +388,3 @@ class _InfoChip extends StatelessWidget {
     );
   }
 }
-
-enum _FolderMenuAction { edit, delete }

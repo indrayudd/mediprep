@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:cupertino_native/cupertino_native.dart';
 
 import '../data/visit_folder.dart';
 import '../data/visit_record.dart';
@@ -10,7 +11,7 @@ import '../widgets/edit_sheets.dart';
 import 'visit_detail_screen.dart';
 import 'visit_form_screen.dart';
 
-class FolderDetailScreen extends StatelessWidget {
+class FolderDetailScreen extends StatefulWidget {
   const FolderDetailScreen({
     super.key,
     required this.folderId,
@@ -23,10 +24,27 @@ class FolderDetailScreen extends StatelessWidget {
   final VoidCallback onChangeModel;
 
   @override
+  State<FolderDetailScreen> createState() => _FolderDetailScreenState();
+}
+
+class _FolderDetailScreenState extends State<FolderDetailScreen> {
+  void _openVisitForm(BuildContext context, VisitFolder folder) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => VisitFormScreen(
+          model: widget.model,
+          initialFolderId: folder.id,
+          onChangeModel: widget.onChangeModel,
+        ),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Consumer<VisitRepository>(
       builder: (context, repository, _) {
-        final folder = repository.getFolderById(folderId);
+        final folder = repository.getFolderById(widget.folderId);
         if (folder == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Folder details')),
@@ -161,94 +179,79 @@ class FolderDetailScreen extends StatelessWidget {
           appBar: AppBar(
             title: Text(folder.conditionName),
             actions: [
-              IconButton(
-                tooltip: 'Change AI model',
-                onPressed: onChangeModel,
-                icon: const Icon(Icons.settings),
-              ),
-              PopupMenuButton<_FolderAction>(
-                tooltip: 'Folder actions',
-                onSelected: (action) {
-                  switch (action) {
-                    case _FolderAction.edit:
-                      handleEditFolder();
-                      break;
-                    case _FolderAction.delete:
-                      handleDeleteFolder();
-                      break;
+              CNPopupMenuButton(
+                buttonLabel: '...',
+                items: const [
+                  CNPopupMenuItem(label: 'Edit folder', icon: CNSymbol('pencil')),
+                  CNPopupMenuItem(label: 'Delete folder', icon: CNSymbol('trash')),
+                ],
+                onSelected: (index) {
+                  if (index == 0) {
+                    handleEditFolder();
+                  } else if (index == 1) {
+                    handleDeleteFolder();
                   }
                 },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: _FolderAction.edit,
-                    child: ListTile(
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('Edit folder'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _FolderAction.delete,
-                    child: ListTile(
-                      leading: Icon(Icons.delete_outline),
-                      title: Text('Delete folder'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => VisitFormScreen(
-                    model: model,
-                    initialFolderId: folderId,
-                    onChangeModel: onChangeModel,
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.add),
-            label: const Text('New visit'),
-          ),
-          body: ListView(
-            padding: const EdgeInsets.all(16),
+          body: Stack(
             children: [
-              _FolderHeader(folder: folder),
-              const SizedBox(height: 24),
-              Text(
-                'Visit details',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              if (folder.visits.isEmpty)
-                const _EmptyVisits()
-              else
-                ...folder.visits.map(
-                  (visit) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _VisitTile(
-                      visit: visit,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => VisitDetailScreen(
-                              folderId: folderId,
-                              visitId: visit.id,
-                              model: model,
-                              onChangeModel: onChangeModel,
-                            ),
-                          ),
-                        );
-                      },
-                      onEdit: () => handleEditVisit(visit),
-                      onDelete: () => handleDeleteVisit(visit),
-                    ),
+              ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                children: [
+                  _FolderHeader(folder: folder),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Visits',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
+                  const SizedBox(height: 12),
+                  if (folder.visits.isEmpty)
+                    const _EmptyVisits()
+                  else
+                    ...folder.visits.map(
+                      (visit) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _VisitTile(
+                          visit: visit,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => VisitDetailScreen(
+                                  model: widget.model,
+                                  folderId: folder.id,
+                                  visitId: visit.id,
+                                  onChangeModel: widget.onChangeModel,
+                                ),
+                              ),
+                            );
+                          },
+                          onEdit: () => handleEditVisit(visit),
+                          onDelete: () => handleDeleteVisit(visit),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              Positioned(
+                bottom: 24,
+                left: 24,
+                child: CNButton.icon(
+                  icon: const CNSymbol('gearshape.fill'),
+                  onPressed: widget.onChangeModel,
+                  style: CNButtonStyle.glass,
                 ),
+              ),
+              Positioned(
+                bottom: 24,
+                right: 24,
+                child: CNButton.icon(
+                  icon: const CNSymbol('plus'),
+                  onPressed: () => _openVisitForm(context, folder),
+                  style: CNButtonStyle.glass,
+                ),
+              ),
             ],
           ),
         );
@@ -325,7 +328,7 @@ class _HeaderChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: theme.colorScheme.onPrimaryContainer.withValues(alpha: 0.12),
+        color: theme.colorScheme.onPrimaryContainer.withAlpha((255 * 0.12).round()),
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -378,7 +381,7 @@ class _VisitTile extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  color: theme.colorScheme.primary.withAlpha((255 * 0.1).round()),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -415,36 +418,19 @@ class _VisitTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              PopupMenuButton<_VisitAction>(
-                tooltip: 'Visit actions',
-                onSelected: (action) {
-                  switch (action) {
-                    case _VisitAction.edit:
-                      onEdit();
-                      break;
-                    case _VisitAction.delete:
-                      onDelete();
-                      break;
+              CNPopupMenuButton(
+                buttonLabel: '...',
+                items: const [
+                  CNPopupMenuItem(label: 'Edit visit', icon: CNSymbol('pencil')),
+                  CNPopupMenuItem(label: 'Delete visit', icon: CNSymbol('trash')),
+                ],
+                onSelected: (index) {
+                  if (index == 0) {
+                    onEdit();
+                  } else if (index == 1) {
+                    onDelete();
                   }
                 },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: _VisitAction.edit,
-                    child: ListTile(
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('Edit visit'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: _VisitAction.delete,
-                    child: ListTile(
-                      leading: Icon(Icons.delete_outline),
-                      title: Text('Delete visit'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                ],
               ),
               Icon(Icons.chevron_right,
                   color: theme.colorScheme.onSurfaceVariant),
@@ -483,7 +469,3 @@ class _EmptyVisits extends StatelessWidget {
     );
   }
 }
-
-enum _FolderAction { edit, delete }
-
-enum _VisitAction { edit, delete }

@@ -322,11 +322,7 @@ class _QuestionGenerationScreenState extends State<QuestionGenerationScreen> {
       appBar: AppBar(
         title: const Text('Discussion guide'),
         actions: [
-          IconButton(
-            tooltip: 'Change AI model',
-            onPressed: widget.onChangeModel,
-            icon: const Icon(Icons.settings),
-          ),
+
         ],
       ),
       body: SafeArea(

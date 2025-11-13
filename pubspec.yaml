@@ -47,6 +47,9 @@ dependencies:
   provider: ^6.1.2
   record: ^6.1.2
   just_audio: ^0.9.38
+  cupertino_native: ^0.1.1
+  liquid_glass_renderer: ^0.2.0-dev.3
+
 
 dev_dependencies:
   flutter_test:

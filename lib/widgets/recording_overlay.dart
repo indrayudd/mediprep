@@ -1,17 +1,20 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:cupertino_native/cupertino_native.dart';
+import 'package:liquid_glass_renderer/liquid_glass_renderer.dart';
 
 import '../data/recording_meta.dart';
 import '../theme/app_colors.dart';
 import '../services/audio_recorder_service.dart';
 import 'animated_waveform.dart';
+
+// --- Data Models & Typedefs ---
 
 class RecordingSessionContext {
   RecordingSessionContext({
@@ -50,6 +53,8 @@ class RecordingOverlayConfig {
   final String visitId;
   final Future<void> Function(NavigatorState navigator)? onOpenVisit;
 }
+
+// --- Controller ---
 
 enum _OverlayMode { idle, recording, playing }
 
@@ -424,6 +429,8 @@ class RecordingOverlayController extends ChangeNotifier {
   }
 }
 
+// --- Host Widget ---
+
 class RecordingOverlayHost extends StatelessWidget {
   const RecordingOverlayHost({super.key, required this.child});
 
@@ -432,48 +439,39 @@ class RecordingOverlayHost extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<RecordingOverlayController>();
-    final showPanel = controller.showPanel;
     final showBanner = controller.showBanner;
+    final bannerWidget = showBanner
+        ? Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: Material(
+              color: Colors.transparent,
+              child: _RecordingBanner(controller: controller),
+            ),
+          )
+        : const SizedBox.shrink();
 
-    return Stack(
-      children: [
-        child,
-        if (showBanner)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            top: showBanner ? 0 : -100,
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 300),
-              opacity: showBanner ? 1.0 : 0.0,
-              child: Material(
-                color: Colors.transparent,
-                child: _RecordingBanner(controller: controller),
-              ),
+    final backgroundColor = Theme.of(context).scaffoldBackgroundColor;
+    return Container(
+      color: backgroundColor,
+      child: Column(
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          SafeArea(
+            bottom: false,
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeInOut,
+              child: bannerWidget,
             ),
           ),
-        if (showPanel)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            bottom: showPanel ? 0 : -200,
-            left: 0,
-            right: 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 300),
-              opacity: showPanel ? 1.0 : 0.0,
-              child: Material(
-                color: Colors.transparent,
-                child: _RecordingOverlayPanel(controller: controller),
-              ),
-            ),
-          ),
-      ],
+          Expanded(child: child),
+        ],
+      ),
     );
   }
 }
+
+// --- UI Components ---
 
 class _RecordingBanner extends StatelessWidget {
   const _RecordingBanner({required this.controller});
@@ -483,48 +481,47 @@ class _RecordingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isRecording = controller.isRecording;
-    return SafeArea(
-      bottom: false,
-      child: GestureDetector(
-        onTap: () => controller.openVisit(),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              margin: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: (isRecording ? Colors.red : AppColors.primaryBlue).withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isRecording ? Icons.mic : Icons.play_circle_fill,
-                    color: Colors.white,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      isRecording ? 'Recording in progress' : 'Playing recording',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: controller.isRecording || controller.isPlaying
-                        ? controller.stopCurrentSession
-                        : null,
-                    style: TextButton.styleFrom(foregroundColor: Colors.white),
-                    child: const Text('Stop'),
-                  ),
-                ],
+    return GestureDetector(
+      onTap: () => controller.openVisit(),
+      child: LiquidGlass.withOwnLayer(
+        shape: const LiquidRoundedRectangle(borderRadius: 16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: (isRecording ? Colors.red : AppColors.primaryBlue).withValues(
+              alpha: 0.15,
+            ),
+            border: Border.all(
+              color:
+                  (isRecording ? Colors.red : AppColors.primaryBlue).withValues(
+                alpha: 0.35,
               ),
             ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isRecording ? Icons.mic : Icons.play_circle_fill,
+                color: isRecording ? Colors.red : AppColors.primaryBlue,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  isRecording ? 'Recording in progress' : 'Playing recording',
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: controller.isRecording || controller.isPlaying
+                    ? controller.stopCurrentSession
+                    : null,
+                child: const Text('Stop'),
+              ),
+            ],
           ),
         ),
       ),
@@ -532,8 +529,8 @@ class _RecordingBanner extends StatelessWidget {
   }
 }
 
-class _RecordingOverlayPanel extends StatelessWidget {
-  const _RecordingOverlayPanel({required this.controller});
+class RecordingOverlayPanel extends StatelessWidget {
+  const RecordingOverlayPanel({super.key, required this.controller});
 
   final RecordingOverlayController controller;
 
@@ -556,164 +553,150 @@ class _RecordingOverlayPanel extends StatelessWidget {
     final showOpenButton =
         controller.shouldShowOpenVisitButton(config.visitId);
 
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.8),
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 16,
-                    offset: const Offset(0, -4),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: LiquidGlass.withOwnLayer(
+        shape: const LiquidRoundedRectangle(borderRadius: 28),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withAlpha(51)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          config.title,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          DateFormat.yMMMMd().format(config.date),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  if (showOpenButton)
+                    IconButton(
+                      onPressed: controller.openVisit,
+                      icon: const Icon(Icons.open_in_new),
+                    ),
+                  if (showPlaybackState)
+                    IconButton(
+                      onPressed: controller.closePlaybackPanel,
+                      icon: const Icon(Icons.close),
+                    ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              config.title,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              DateFormat.yMMMMd().format(config.date),
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
+              const SizedBox(height: 10),
+              if (showRecordingState)
+                Row(
+                  children: [
+                    Expanded(
+                      child: AnimatedWaveform(amplitude: controller.amplitude),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _format(controller.elapsed),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
-                      if (showOpenButton)
+                    ),
+                  ],
+                )
+              else if (showPlaybackState)
+                Column(
+                  children: [
+                    const SizedBox(height: 4),
+                    _PlaybackProgressBar(controller: controller),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(_format(controller.playbackPosition)),
+                        Text(_format(controller.playbackDuration)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
                         IconButton(
-                          onPressed: controller.openVisit,
-                          icon: const Icon(Icons.open_in_new),
+                          icon: const Icon(Icons.replay_5),
+                          onPressed: () => controller.seekPlayback(
+                            const Duration(seconds: -5),
+                          ),
                         ),
-                      if (showPlaybackState)
                         IconButton(
-                          onPressed: controller.closePlaybackPanel,
-                          icon: const Icon(Icons.close),
+                          icon: const Icon(Icons.forward_5),
+                          onPressed: () => controller.seekPlayback(
+                            const Duration(seconds: 5),
+                          ),
                         ),
+                      ],
+                    ),
+                  ],
+                )
+              else if (showIdleState)
+                Text(
+                  'Tap to capture answers or summaries in your own voice.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => controller.handlePrimaryButton(config),
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color:
+                        showPlaybackState ? AppColors.primaryBlue : Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha((255 * 0.08).round()),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  if (showRecordingState)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: AnimatedWaveform(amplitude: controller.amplitude),
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          _format(controller.elapsed),
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    )
-                  else if (showPlaybackState)
-                    Column(
-                      children: [
-                        const SizedBox(height: 4),
-                        _PlaybackProgressBar(controller: controller),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(_format(controller.playbackPosition)),
-                            Text(_format(controller.playbackDuration)),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.replay_5),
-                              onPressed: () => controller.seekPlayback(
-                                const Duration(seconds: -5),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.forward_5),
-                              onPressed: () => controller.seekPlayback(
-                                const Duration(seconds: 5),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    )
-                  else if (showIdleState)
-                    Text(
-                      'Tap to capture answers or summaries in your own voice.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  const SizedBox(height: 12),
-                  GestureDetector(
-                    onTap: () => controller.handlePrimaryButton(config),
+                  child: Center(
                     child: Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
+                      width: 44,
+                      height: 44,
+                      decoration: const BoxDecoration(
                         shape: BoxShape.circle,
-                        color: showPlaybackState ? AppColors.primaryBlue : Colors.white,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 16,
-                            offset: const Offset(0, 6),
-                          ),
-                        ],
+                        color: Colors.white,
                       ),
-                      child: Center(
-                        child: Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: showPlaybackState ? Colors.white : Colors.white,
-                          ),
-                          child: _PrimaryGlyph(
-                            showPlaybackState: showPlaybackState,
-                            isPlaybackActive: isPlaybackActive,
-                            isPlaybackCompleted: isPlaybackCompleted,
-                            showRecordingState: showRecordingState,
-                          ),
-                        ),
+                      child: _PrimaryGlyph(
+                        showPlaybackState: showPlaybackState,
+                        isPlaybackActive: isPlaybackActive,
+                        isPlaybackCompleted: isPlaybackCompleted,
+                        showRecordingState: showRecordingState,
                       ),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
     );
-
   }
 
   String _format(Duration duration) {
@@ -783,35 +766,12 @@ class _PlaybackProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalMillis = controller.playbackDuration.inMilliseconds;
-    final safeTotal = totalMillis <= 0 ? 1 : totalMillis;
-    final currentMillis = controller.playbackPosition.inMilliseconds
-        .clamp(0, safeTotal);
-    final ratio = (currentMillis / safeTotal).clamp(0, 1);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth * ratio;
-        return Stack(
-          children: [
-            Container(
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.lightBlue,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              width: width.isFinite ? width : 0,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.primaryBlue,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-          ],
-        );
+    return CNSlider(
+      value: controller.playbackPosition.inSeconds.toDouble(),
+      min: 0,
+      max: controller.playbackDuration.inSeconds.toDouble(),
+      onChanged: (value) {
+        controller.seekPlayback(Duration(seconds: value.toInt()));
       },
     );
   }
@@ -956,7 +916,7 @@ class _RecordingTileState extends State<_RecordingTile> {
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
+                    color: Colors.black.withAlpha((255 * 0.04).round()),
                     blurRadius: 24,
                     offset: const Offset(0, 8),
                   ),

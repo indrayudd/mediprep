@@ -100,24 +100,25 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
 
         return Consumer<RecordingOverlayController>(
           builder: (context, overlayController, _) {
-            final bottomInset =
-                overlayController.isPanelVisibleFor(_overlayOwnerId)
-                    ? 110.0
-                    : 80.0;
+            final panelVisible =
+                overlayController.isPanelVisibleFor(_overlayOwnerId);
+            final bottomInset = panelVisible ? 150.0 : 80.0;
             return Scaffold(
               appBar: AppBar(
                 title: Text(visit.title),
                 actions: [
-              IconButton(
-                tooltip: 'Change AI model',
-                onPressed: widget.onChangeModel,
-                icon: const Icon(Icons.settings),
-              ),
+                  IconButton(
+                    tooltip: 'Change AI model',
+                    onPressed: widget.onChangeModel,
+                    icon: const Icon(Icons.settings),
+                  ),
                 ],
               ),
-              body: ListView(
-                padding: const EdgeInsets.all(16),
+              body: Stack(
                 children: [
+                  ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
                   _VisitSummaryCard(folder: folder, visit: visit),
                   const SizedBox(height: 24),
                   Row(
@@ -215,7 +216,24 @@ class _VisitDetailScreenState extends State<VisitDetailScreen> {
                       ),
                     ),
                   ],
-                  SizedBox(height: bottomInset),
+                      SizedBox(height: bottomInset),
+                    ],
+                  ),
+                  if (panelVisible)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: SafeArea(
+                        top: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                          child: RecordingOverlayPanel(
+                            controller: overlayController,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             );
